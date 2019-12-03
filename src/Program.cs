@@ -1,4 +1,5 @@
 ﻿/* Stuff considered while porting this file from Python:
+ * - Everything is kept into this *single* file
  * - Var names are left equal, except been C-Sharpified: this way will help us keep changes from the original source
  * - Comments are stripped: to avoid their maintenance
  */
@@ -87,17 +88,12 @@ namespace Mono.WebAssembly.FilePackager
                 return;
             }
 
-            Run();
-        }
-
-        static void Run()
-        {
             var mode = "preload";
             var preloadFile = new string(preload);
             var atPosition = preloadFile.Replace("@@", "__").IndexOf('@');
             var usesAtNotation = atPosition != -1;
             string srcPath, dstPath;
-            var dataFiles = new List<(string srcPath, string dstPath, string mode, bool explicitDstPath, 
+            var dataFiles = new List<(string srcPath, string dstPath, string mode, bool explicitDstPath,
                 int dataStart, int dataEnd)>();
 
             if (usesAtNotation)
@@ -601,7 +597,8 @@ Module.expectedDataFileDownloads++;
         static void Usage()
         {
             // show some app description message
-            Console.WriteLine("Usage: Mono.WebAssembly.FilePackger.exe --target TARGET [--preload A [B..]] [--js-output=OUTPUT.js] [--no-heap-copy] [--separate-metadata]");
+            Console.WriteLine("Usage: dotnet run Mono.WebAssembly.FilePackager.csproj " +
+                "--target TARGET [--preload A [B..]] [--js-output=OUTPUT.js] [--no-heap-copy] [--separate-metadata]");
             Console.WriteLine();
 
             // output the options
