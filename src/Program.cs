@@ -31,14 +31,14 @@ namespace Mono.WebAssembly.FilePackager
         const string SeparateMetadataUsage = 
             "Stores package metadata separately. Only applicable when preloading and js-output file is specified.";
         const string ExportName = "Module";
-        
+        const string Separator = "/";
+
         static readonly string[] AudioSuffixes = new string[] { ".ogg", ".wav", ".mp3" };
 
         static Configuration config = new Configuration();
         static OptionSet options;
         static List<(string srcPath, string dstPath, string mode, bool explicitDstPath, int dataStart, int dataEnd)> newDataFiles = 
             new List<(string srcPath, string dstPath, string mode, bool explicitDstPath, int dataStart, int dataEnd)>();
-        static List<string> newDirNames = new List<string>();
         static bool hasPreloaded = false;
         static bool lz4 = false;
         static bool force = true;
@@ -106,23 +106,22 @@ namespace Mono.WebAssembly.FilePackager
             else
             {
                 srcPath = dstPath = preloadFile.Replace("@@", "@");
+            }
 
-                if (File.Exists(srcPath) || Directory.Exists(srcPath))
-                {
-                    dataFiles.Add((srcPath, dstPath, mode, usesAtNotation, -1, -1));
-                }
-                else
-                {
-                    Console.WriteLine($"Warning: {preloadFile} does not exist, ignoring.");
-                }
+            if (File.Exists(srcPath) || Directory.Exists(srcPath))
+            {
+                dataFiles.Add((srcPath, dstPath, mode, usesAtNotation, -1, -1));
+            }
+            else
+            {
+                Console.WriteLine($"Warning: {preloadFile} does not exist, ignoring.");
             }
 
             var ret = @$"
 var Module = typeof {ExportName} !== 'undefined' ? {ExportName} : {{}};
 ";
             ret += @"
-if (!Module.expectedDataFileDownloads)
-{
+if (!Module.expectedDataFileDownloads) {
   Module.expectedDataFileDownloads = 0;
   Module.finishedDataFileDownloads = 0;
 }
@@ -131,9 +130,9 @@ Module.expectedDataFileDownloads++;
  var loadPackage = function(metadata) {
 ";
             var code = @"
-function assert(check, msg) {
-  if (!check) throw msg + new Error().stack;
-}
+    function assert(check, msg) {
+      if (!check) throw msg + new Error().stack;
+    }
 ";
             foreach (var file in dataFiles)
             {
@@ -194,14 +193,18 @@ function assert(check, msg) {
             for (var i = 0; i < dataFiles.Count; i++)
             {
                 var file = dataFiles[i];
-                file.dstPath = file.dstPath.Replace(Path.DirectorySeparatorChar, '/');
+                file.dstPath = file.dstPath.Replace(Path.DirectorySeparatorChar.ToString(), Separator);
 
-                if (file.dstPath.EndsWith('/'))
+                if (file.dstPath.EndsWith(Separator))
                 {
                     file.dstPath = file.dstPath + Path.GetFileName(file.srcPath);
                 }
 
-                file.dstPath = Path.Join("/", file.dstPath);
+                if (!file.dstPath.StartsWith(Separator))
+                {
+                    file.dstPath = Separator + file.dstPath;
+                }
+
                 dataFiles[i] = file;
                 Debug.WriteLine($"Packaging file \"{file.srcPath}\" to VFS in path \"{file.dstPath}\".");
             }
@@ -221,20 +224,21 @@ function assert(check, msg) {
 
             foreach (var file in dataFiles)
             {
-                var dirname = Path.GetDirectoryName(file.dstPath);
+                var dirName = GetDirectoryNameWithForwardSlashes(file.dstPath);
+                dirName = dirName.TrimStart(Separator[0]);
 
-                if (dirname != string.Empty)
+                if (dirName != string.Empty)
                 {
-                    var parts = dirname.Split('/');
+                    var parts = dirName.Split(Separator);
 
                     for (var i = 0; i < parts.Length; i++)
                     {
-                        var partial = string.Join('/', parts.Take(i + 1));
+                        var partial = string.Join(Separator, parts.Take(i + 1));
 
                         if (!partialDirs.Contains(partial))
                         {
-                            code += $"Module['FS_createPath']" +
-                                $"('{string.Join('/', parts.Take(i))}', '{parts[i]}', true, true);\n";
+                            code += $"Module['FS_createPath'](" +
+                                $"'{Separator + string.Join(Separator, parts.Take(i))}', '{parts[i]}', true, true);\n";
                             partialDirs.Add(partial);
                         }
                     }
@@ -301,7 +305,7 @@ function assert(check, msg) {
         for (var i = 0; i < files.length; ++i) {{
           new DataRequest(files[i].start, files[i].end, files[i].audio).open('GET', files[i].filename);
         }}
-  ";
+";
             }
 
             var counter = 0;
@@ -309,7 +313,7 @@ function assert(check, msg) {
             foreach (var file in dataFiles)
             {
                 var fileName = file.dstPath;
-                var dirName = Path.GetDirectoryName(fileName);
+                var dirName = GetDirectoryNameWithForwardSlashes(fileName);
                 var baseName = Path.GetFileName(fileName);
 
                 if (file.mode == "preload")
@@ -440,6 +444,7 @@ function assert(check, msg) {
       };
       xhr.send(null);
     };
+
     function handleError(error) {
       console.error('package error:', error);
     };
@@ -463,6 +468,7 @@ function assert(check, msg) {
                 ret += @"
       var fetchedCallback = null;
       var fetched = Module['getPreloadedPackage'] ? Module['getPreloadedPackage'](REMOTE_PACKAGE_NAME, REMOTE_PACKAGE_SIZE) : null;
+
       if (!fetched) fetchRemotePackage(REMOTE_PACKAGE_NAME, REMOTE_PACKAGE_SIZE, function(data) {
         if (fetchedCallback) {
           fetchedCallback(data);
@@ -507,7 +513,6 @@ function assert(check, msg) {
 }})();
 ";
 
-
             if (force || dataFiles.Any())
             {
                 if (string.IsNullOrEmpty(config.JSOutput))
@@ -535,16 +540,21 @@ function assert(check, msg) {
             Environment.Exit(0);
         }
 
-        static string EscapeForJSString(string s) => s.Replace('\\', '/').Replace("'", "\\'").Replace("\"", "\\\"");
+        static string GetDirectoryNameWithForwardSlashes(string path) => 
+            Path.GetDirectoryName(path).Replace("\\", Separator);
 
-        static void Add(string mode, string rootpathsrc, string rootpathdst)
+        static string EscapeForJSString(string s) => 
+            s.Replace("\\", Separator).Replace("'", "\\'").Replace("\"", "\\\"");
+
+        static void Add(string mode, string rootPathSrc, string rootPathDst)
         {
-            foreach (var fullName in Directory.EnumerateDirectories(rootpathsrc))
+            var dirNames = new List<string>();
+
+            foreach (var fullName in Directory.EnumerateDirectories(rootPathSrc, "*", SearchOption.AllDirectories))
             {
                 if (!ShouldIgnore(fullName))
                 {
-                    var name = Path.GetRelativePath(rootpathsrc, fullName);
-                    newDirNames.Add(name);
+                    dirNames.Add(fullName);
                 }
                 else
                 {
@@ -553,17 +563,23 @@ function assert(check, msg) {
                 }
             }
 
-            foreach (var fullName in Directory.EnumerateFiles(rootpathsrc))
+            foreach (var dirName in dirNames)
             {
-                if (!ShouldIgnore(fullName))
+                foreach (var fullName in Directory.EnumerateFiles(dirName))
                 {
-                    var dstPath = Path.Join(rootpathdst, Path.GetRelativePath(rootpathsrc, fullName));
-                    newDataFiles.Add((fullName, dstPath, mode, true, -1, -1));
-                }
-                else
-                {
-                    Debug.WriteLine($"Skipping file \"{fullName}\" from inclusion in the emscripten " +
-                        "virtual file system.");
+                    if (!ShouldIgnore(fullName))
+                    {
+                        var dstPath = string.Join(
+                            Separator,
+                            rootPathDst, 
+                            Path.GetRelativePath(rootPathSrc, fullName).Replace("\\", Separator));
+                        newDataFiles.Add((fullName, dstPath, mode, true, -1, -1));
+                    }
+                    else
+                    {
+                        Debug.WriteLine($"Skipping file \"{fullName}\" from inclusion in the emscripten " +
+                            "virtual file system.");
+                    }
                 }
             }
         }
