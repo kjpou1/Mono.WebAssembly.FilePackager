@@ -35,7 +35,8 @@ namespace Mono.WebAssembly.FilePackager
 
         static readonly string[] AudioSuffixes = new string[] { ".ogg", ".wav", ".mp3" };
 
-        static Configuration config = new Configuration();
+        static string dataTarget, preload, jsOutput;
+        static bool heapCopy = true;
         static OptionSet options;
         static List<(string srcPath, string dstPath, string mode, bool explicitDstPath, int dataStart, int dataEnd)> newDataFiles = 
             new List<(string srcPath, string dstPath, string mode, bool explicitDstPath, int dataStart, int dataEnd)>();
@@ -48,22 +49,23 @@ namespace Mono.WebAssembly.FilePackager
             var shouldShowHelp = false;
 
             options = new OptionSet {
-                { "t|target=", "target data filename." , target => config.Target = target },
-                { "p|preload=", PreloadUsage , preload =>
+                { "t|target=", "target data filename." , target => dataTarget = target },
+                { "p|preload=", PreloadUsage , value =>
                 {
-                    config.Preload = preload;
+                    preload = value;
                     hasPreloaded = true;
                 }},
-                { "j|js-output=", "Writes output in FILE, if not specified, standard output is used." , jsOutput => 
-                    config.JSOutput = jsOutput },
-                { "n|no-heap-copy", NoHeapCopyUsage , _ => config.HeapCopy = false },
-                { "s|separate-metadata", SeparateMetadataUsage , _ => config.SeparateMetaData = true },
+                { 
+                    "j|js-output=", "Writes output in FILE, if not specified, standard output is used.", 
+                    value => jsOutput = value },
+                { "n|no-heap-copy", NoHeapCopyUsage , _ => heapCopy = false },
+                { "s|separate-metadata", SeparateMetadataUsage , _ => throw new NotImplementedException() },
                 { "h|help", "show this message and exit", help => shouldShowHelp = help != null },
             };
 
             try
             {
-                var extra = options.Parse(args);
+                options.Parse(args);
             }
             catch (OptionException e)
             {
@@ -74,7 +76,7 @@ namespace Mono.WebAssembly.FilePackager
                 return;
             }
 
-            if (string.IsNullOrWhiteSpace(config.Target))
+            if (string.IsNullOrWhiteSpace(dataTarget))
             {
                 shouldShowHelp = true;
             }
@@ -91,7 +93,7 @@ namespace Mono.WebAssembly.FilePackager
         static void Run()
         {
             var mode = "preload";
-            var preloadFile = new string(config.Preload);
+            var preloadFile = new string(preload);
             var atPosition = preloadFile.Replace("@@", "__").IndexOf('@');
             var usesAtNotation = atPosition != -1;
             string srcPath, dstPath;
@@ -247,7 +249,7 @@ Module.expectedDataFileDownloads++;
 
             if (hasPreloaded)
             {
-                var data = File.OpenWrite(config.Target);
+                var data = File.OpenWrite(dataTarget);
                 var start = 0;
 
                 for (var i = 0; i < dataFiles.Count; i++)
@@ -267,8 +269,8 @@ Module.expectedDataFileDownloads++;
                 {
                     Console.WriteLine(
                         $"warning: file packager is creating an asset bundle of {start / (1024 * 1024)} MB. " +
-                        "this is very large, and browsers might have trouble loading it. " +
-                        "see https://hacks.mozilla.org/2015/02/synchronous-execution-and-filesystem-access-in-emscripten/");
+                        "this is very large, and browsers might have trouble loading it. See " +
+                        "https://hacks.mozilla.org/2015/02/synchronous-execution-and-filesystem-access-in-emscripten/");
                 }
 
                 var createData = @"
@@ -340,7 +342,7 @@ Module.expectedDataFileDownloads++;
             {
                 if (!lz4)
                 {
-                    if (config.HeapCopy)
+                    if (heapCopy)
                     {
                         useData = @"
         // copy the entire loaded file into a spot in the heap. Files will refer to slices in that. They cannot be freed though
@@ -363,12 +365,12 @@ Module.expectedDataFileDownloads++;
           }
     ";
                         useData += "          Module['removeRunDependency']" +
-                            $"('datafile_{EscapeForJSString(config.Target)}');\n";
+                            $"('datafile_{EscapeForJSString(dataTarget)}');\n";
                     }
                 }
 
                 var packageUuid = Guid.NewGuid();
-                var packageName = config.Target;
+                var packageName = dataTarget;
                 var remotePackageSize = new FileInfo(packageName).Length;
                 var remotePackageName = Path.GetFileName(packageName);
                 ret += @$"
@@ -381,7 +383,7 @@ Module.expectedDataFileDownloads++;
     }} else {{
       throw 'using preloaded data can only be done on a web page or in a web worker';
     }}
-    var PACKAGE_NAME = '{EscapeForJSString(config.Target)}';
+    var PACKAGE_NAME = '{EscapeForJSString(dataTarget)}';
     var REMOTE_PACKAGE_BASE = '{EscapeForJSString(remotePackageName)}';
     if (typeof Module['locateFilePackage'] === 'function' && !Module['locateFile']) {{
       Module['locateFile'] = Module['locateFilePackage'];
@@ -459,7 +461,7 @@ Module.expectedDataFileDownloads++;
       var curr;
       {useData}
     }};
-    Module['addRunDependency']('datafile_{EscapeForJSString(config.Target)}');
+    Module['addRunDependency']('datafile_{EscapeForJSString(dataTarget)}');
   ";
                 code += @"
     if (!Module.preloadResults) Module.preloadResults = {};
@@ -515,24 +517,24 @@ Module.expectedDataFileDownloads++;
 
             if (force || dataFiles.Any())
             {
-                if (string.IsNullOrEmpty(config.JSOutput))
+                if (string.IsNullOrEmpty(jsOutput))
                 {
                     Console.WriteLine(ret);
                 }
                 else
                 {
-                    if (File.Exists(config.JSOutput))
+                    if (File.Exists(jsOutput))
                     {
-                        var old = File.ReadAllText(config.JSOutput);
+                        var old = File.ReadAllText(jsOutput);
 
                         if (old != ret)
                         {
-                            File.WriteAllText(config.JSOutput, ret);
+                            File.WriteAllText(jsOutput, ret);
                         }
                     }
                     else
                     {
-                        File.WriteAllText(config.JSOutput, ret);
+                        File.WriteAllText(jsOutput, ret);
                     }
                 }
             }
