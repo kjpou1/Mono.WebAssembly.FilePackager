@@ -334,7 +334,7 @@ Module.expectedDataFileDownloads++;
                 }
             }
 
-            string use_data = null;
+            string useData = null;
 
             if (hasPreloaded)
             {
@@ -342,7 +342,7 @@ Module.expectedDataFileDownloads++;
                 {
                     if (config.HeapCopy)
                     {
-                        use_data = @"
+                        useData = @"
         // copy the entire loaded file into a spot in the heap. Files will refer to slices in that. They cannot be freed though
         // (we may be allocating before malloc is ready, during startup).
         var ptr = Module['getMemory'](byteArray.length);
@@ -352,17 +352,17 @@ Module.expectedDataFileDownloads++;
                     }
                     else
                     {
-                        use_data = @"
+                        useData = @"
         // Reuse the bytearray from the XHR as the source for file reads.
         DataRequest.prototype.byteArray = byteArray;
   ";
-                        use_data += @"
+                        useData += @"
           var files = metadata.files;
           for (var i = 0; i < files.length; ++i) {
             DataRequest.prototype.requests[files[i].filename].onload();
           }
     ";
-                        use_data += "          Module['removeRunDependency']" +
+                        useData += "          Module['removeRunDependency']" +
                             $"('datafile_{EscapeForJSString(config.Target)}');\n";
                     }
                 }
@@ -457,7 +457,7 @@ Module.expectedDataFileDownloads++;
       assert(arrayBuffer instanceof ArrayBuffer, 'bad input to processPackageData');
       var byteArray = new Uint8Array(arrayBuffer);
       var curr;
-      {use_data}
+      {useData}
     }};
     Module['addRunDependency']('datafile_{EscapeForJSString(config.Target)}');
   ";
