@@ -8,12 +8,28 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using Mono.Options;
 
 namespace Mono.WebAssembly.FilePackager
 {
     class Program
     {
+        const string PreloadUsage =
+            "preload-file <filename>. Specify a file to preload before running the compiled code asynchronously. " +
+            "The path is relative to the current directory at compile time. " +
+            "If a directory is passed here, its entire contents will be embedded.\n\n" +
+            "Preloaded files are stored in `<filename>.data`, " +
+            "where `<filename>.html` is the main file you are compiling to.\n" +
+            "To run your code, you will need both the `<filename>.html` and the `<filename>.data`.";
+        const string NoHeapCopyUsage = 
+            "If specified, the preloaded filesystem is not copied inside the Emscripten HEAP, " +
+            "but kept in a separate typed array outside it.\n" +
+            "The default, if this is not specified, is to embed the VFS inside the HEAP, " +
+            "so that mmap()ing files in it is a no-op.\n" +
+            "Passing this flag optimizes for fread() usage, omitting it optimizes for mmap() usage.";
+        const string SeparateMetadataUsage = 
+            "Stores package metadata separately. Only applicable when preloading and js-output file is specified.";
         const string ExportName = "Module";
         
         static readonly string[] AudioSuffixes = new string[] { ".ogg", ".wav", ".mp3" };
@@ -30,36 +46,24 @@ namespace Mono.WebAssembly.FilePackager
         static void Main(string[] args)
         {
             var shouldShowHelp = false;
-            const string preloadfile = @"preload-file <filename>.  Specify a file to preload before running the compiled code
-asynchronously.  The path is relative to the current directory at compile time. If a directory is passed here, its entire contents
-will be embedded.
-
-Preloaded files are stored in `<filename>.data`, where `<filename>.html` is the main file you are compiling to.
-To run your code, you will need both the `<filename>.html` and the `<filename>.data`.";
-
-            const string noHeapCopy = @"If specified, the preloaded filesystem is not copied inside the Emscripten HEAP, but kept in a separate typed array outside it.  
-The default, if this is not specified, is to embed the VFS inside the HEAP, so that mmap()ing files in it is a no-op.
-Passing this flag optimizes for fread() usage, omitting it optimizes for mmap() usage.";
-
-            const string separateMetadata = @"Stores package metadata separately. Only applicable when preloading and js-output file is specified.";
 
             options = new OptionSet {
-                { "t|target=", "target data filename." , t => config.Target = t },
-                { "p|preload-file=", preloadfile , plf =>
+                { "t|target=", "target data filename." , target => config.Target = target },
+                { "p|preload=", PreloadUsage , preload =>
                 {
-                    config.PreloadFile = plf;
+                    config.Preload = preload;
                     hasPreloaded = true;
                 }},
-                { "j|js-output=", "Writes output in FILE, if not specified, standard output is used." , jso => config.JSOutput = jso },
-                { "n|no-heap-copy", noHeapCopy , _ => config.HeapCopy = false },
-                { "s|separate-metadata", separateMetadata , _ => config.SeparateMetaData = true },
-                { "h|help", "show this message and exit", h => shouldShowHelp = h != null },
+                { "j|js-output=", "Writes output in FILE, if not specified, standard output is used." , jsOutput => 
+                    config.JSOutput = jsOutput },
+                { "n|no-heap-copy", NoHeapCopyUsage , _ => config.HeapCopy = false },
+                { "s|separate-metadata", SeparateMetadataUsage , _ => config.SeparateMetaData = true },
+                { "h|help", "show this message and exit", help => shouldShowHelp = help != null },
             };
 
-            List<string> extra;
             try
             {
-                extra = options.Parse(args);
+                var extra = options.Parse(args);
             }
             catch (OptionException e)
             {
@@ -70,26 +74,24 @@ Passing this flag optimizes for fread() usage, omitting it optimizes for mmap() 
                 return;
             }
 
-            if (string.IsNullOrEmpty(config.Target))
+            if (string.IsNullOrWhiteSpace(config.Target))
             {
                 shouldShowHelp = true;
-
             }
 
             if (shouldShowHelp)
             {
                 Usage();
+                return;
             }
-
-            Console.WriteLine($"Target: {config.Target}");
 
             Run();
         }
 
         static void Run()
         {
-            var mode = "leading";
-            var preloadFile = new string(config.PreloadFile);
+            var mode = "preload";
+            var preloadFile = new string(config.Preload);
             var atPosition = preloadFile.Replace("@@", "__").IndexOf('@');
             var usesAtNotation = atPosition != -1;
             string srcPath, dstPath;
@@ -200,6 +202,7 @@ function assert(check, msg) {
                 }
 
                 file.dstPath = Path.Join("/", file.dstPath);
+                dataFiles[i] = file;
                 Debug.WriteLine($"Packaging file \"{file.srcPath}\" to VFS in path \"{file.dstPath}\".");
             }
 
@@ -249,6 +252,7 @@ function assert(check, msg) {
                     file.dataStart = start;
                     var curr = File.ReadAllBytes(file.srcPath);
                     file.dataEnd = start + curr.Length;
+                    dataFiles[i] = file;
                     start += curr.Length;
                     data.Write(curr);
                 }
@@ -296,7 +300,8 @@ function assert(check, msg) {
         var files = metadata.files;
         for (var i = 0; i < files.length; ++i) {{
           new DataRequest(files[i].start, files[i].end, files[i].audio).open('GET', files[i].filename);
-        }}";
+        }}
+  ";
             }
 
             var counter = 0;
@@ -313,10 +318,10 @@ function assert(check, msg) {
                     counter += 1;
                     ((List<object>)metadata["files"]).Add(new
                     {
-                        FileName = file.dstPath,
-                        Start = file.dataStart,
-                        End = file.dataEnd,
-                        Audio = AudioSuffixes.Contains(fileName.Substring(fileName.Length - 4)) ? 1 : 0,
+                        filename = file.dstPath,
+                        start = file.dataStart,
+                        end = file.dataEnd,
+                        audio = AudioSuffixes.Contains(fileName.Substring(fileName.Length - 4)) ? 1 : 0,
                     });
                 }
                 else
@@ -440,7 +445,7 @@ function assert(check, msg) {
     };
   ";
 
-                code += @$"'
+                code += @$"
     function processPackageData(arrayBuffer) {{
       Module.finishedDataFileDownloads++;
       assert(arrayBuffer, 'Loading data file failed.');
@@ -495,7 +500,7 @@ function assert(check, msg) {
 
             var metadataTemplate = $@"
  }}
- loadPackage({JsonConverter.Convert(metadata)});
+ loadPackage({JsonSerializer.Serialize(metadata)});
 ";
 
             ret += $@"{metadataTemplate}

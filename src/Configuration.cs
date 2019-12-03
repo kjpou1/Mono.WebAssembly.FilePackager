@@ -6,7 +6,7 @@ namespace Mono.WebAssembly.FilePackager
     {
         public string Target { get; set; }
 
-        public string PreloadFile { get; set; }
+        public string Preload { get; set; }
 
         public string JSOutput { get; set; }
 
