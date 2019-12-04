@@ -556,6 +556,7 @@ Module.expectedDataFileDownloads++;
         static void Add(string mode, string rootPathSrc, string rootPathDst)
         {
             var dirNames = new List<string>();
+            dirNames.Add(rootPathSrc);
 
             foreach (var fullName in Directory.EnumerateDirectories(rootPathSrc, "*", SearchOption.AllDirectories))
             {
