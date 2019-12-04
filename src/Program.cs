@@ -1,7 +1,15 @@
 ﻿/* Stuff considered while porting this file from Python:
- * - Everything is kept into this *single* file
+ * - Everything is kept into this *single* file, single class, single Main method (among auxiliary functions): to keep 
+ *   its original nature :-)
  * - Var names are left equal, except been C-Sharpified: this way will help us keep changes from the original source
  * - Comments are stripped: to avoid their maintenance
+ * 
+ * Ahead of its origin:
+ * - Module['setProgress'] is called, if available, when reporting load status:
+ * 
+ *   function (loadedBytes, totalBytes)
+ *   
+ *   It enables adding progress bars to visually enhance the loading wait for big preload files.
  */
 
 using System;
@@ -425,6 +433,7 @@ Module.expectedDataFileDownloads++;
           }
           total = Math.ceil(total * Module.expectedDataFileDownloads/num);
           if (Module['setStatus']) Module['setStatus']('Downloading data... (' + loaded + '/' + total + ')');
+          if (Module['setProgress']) Module['setProgress'](loaded, total);
         } else if (!Module.dataFileDownloads) {
           if (Module['setStatus']) Module['setStatus']('Downloading data...');
         }
