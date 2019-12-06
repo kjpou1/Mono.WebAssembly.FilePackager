@@ -52,6 +52,7 @@ namespace Mono.WebAssembly.FilePackager
         static bool hasPreloaded = false;
         static bool lz4 = false;
         static bool force = true;
+        static bool separateMetaData = false;
 
         static void Main(string[] args)
         {
@@ -68,7 +69,7 @@ namespace Mono.WebAssembly.FilePackager
                     "j|js-output=", "Writes output in FILE, if not specified, standard output is used.", 
                     value => jsOutput = value },
                 { "n|no-heap-copy", NoHeapCopyUsage , _ => heapCopy = false },
-                { "s|separate-metadata", SeparateMetadataUsage , _ => throw new NotImplementedException() },
+                { "s|separate-metadata", SeparateMetadataUsage , _ => separateMetaData = true },
                 { "h|help", "show this message and exit", help => shouldShowHelp = help != null },
             };
 
@@ -439,14 +440,14 @@ Module.expectedDataFileDownloads++;
         }
       };
       xhr.onerror = function(event) {
-        throw new Error('NetworkError for: ' + packageName);
+        throw new Error(""NetworkError for: "" + packageName);
       }
       xhr.onload = function(event) {
         if (xhr.status == 200 || xhr.status == 304 || xhr.status == 206 || (xhr.status == 0 && xhr.response)) { // file URLs can return 0
           var packageData = xhr.response;
           callback(packageData);
         } else {
-          throw new Error(xhr.statusText + ' : ' + xhr.responseURL);
+          throw new Error(xhr.statusText + "" : "" + xhr.responseURL);
         }
       };
       xhr.send(null);
@@ -455,7 +456,7 @@ Module.expectedDataFileDownloads++;
     function handleError(error) {
       console.error('package error:', error);
     };
-  ";
+";
 
                 code += @$"
     function processPackageData(arrayBuffer) {{
@@ -507,15 +508,44 @@ Module.expectedDataFileDownloads++;
     runWithFS();
   } else {
     if (!Module['preRun']) Module['preRun'] = [];
-    Module['preRun'].push(runWithFS); // FS is not initialized yet, wait for it
+    Module[""preRun""].push(runWithFS); // FS is not initialized yet, wait for it
   }
 ";
+            var metadataTemplate = string.Empty;
+            if (separateMetaData) {
+                var metadata_file = Path.GetFileName(jsOutput) + ".metadata";
+                metadataTemplate = $@"
+  Module['removeRunDependency']('{metadata_file}');
+ }}
 
-            var metadataTemplate = $@"
+ function runMetaWithFS() {{
+  Module['addRunDependency']('{metadata_file}');
+  var REMOTE_METADATA_NAME = Module['locateFile'] ? Module['locateFile']('{metadata_file}', '') : '{metadata_file}';
+  var xhr = new XMLHttpRequest();
+  xhr.onreadystatechange = function() {{
+   if (xhr.readyState === 4 && xhr.status === 200) {{
+     loadPackage(JSON.parse(xhr.responseText));
+   }}
+  }}
+  xhr.open('GET', REMOTE_METADATA_NAME, true);
+  xhr.overrideMimeType('application/json');
+  xhr.send(null);
+ }}
+
+ if (Module['calledRun']) {{
+  runMetaWithFS();
+ }} else {{
+  if (!Module['preRun']) Module['preRun'] = [];
+  Module[""preRun""].push(runMetaWithFS);
+ }}
+";
+            } else {
+
+                metadataTemplate = $@"
  }}
  loadPackage({JsonSerializer.Serialize(metadata)});
 ";
-
+            }
             ret += $@"{metadataTemplate}
 }})();
 ";
@@ -540,6 +570,10 @@ Module.expectedDataFileDownloads++;
                     else
                     {
                         File.WriteAllText(jsOutput, ret);
+                    }
+                    if (separateMetaData)
+                    {
+                        File.WriteAllText(jsOutput + ".metadata", JsonSerializer.Serialize(metadata));
                     }
                 }
             }
